@@ -15,6 +15,16 @@ type AppDataDocument = AppData & {
   updatedAt: Date
 }
 
+function isAuthorized(password: unknown): boolean {
+  const expected = process.env.RESET_PASSWORD
+  return (
+    typeof expected === 'string' &&
+    expected.length > 0 &&
+    typeof password === 'string' &&
+    password === expected
+  )
+}
+
 function isValidData(value: unknown): value is AppData {
   if (typeof value !== 'object' || value === null) return false
   const data = value as Partial<AppData>
@@ -22,6 +32,14 @@ function isValidData(value: unknown): value is AppData {
     Array.isArray(data.members) &&
     Array.isArray(data.expenses) &&
     Array.isArray(data.payments)
+  )
+}
+
+function isValidNames(value: unknown): value is Record<string, string> {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    Object.values(value).every((name) => typeof name === 'string')
   )
 }
 
@@ -84,12 +102,14 @@ export async function PUT(request: Request) {
 
     const collection = await getCollection()
     const data = body
+    const existing = await collection.findOne({ _id: DOCUMENT_ID })
+    const members = existing?.members ?? createSeedData().members
 
     await collection.updateOne(
       { _id: DOCUMENT_ID },
       {
         $set: {
-          members: data.members,
+          members,
           expenses: data.expenses,
           payments: data.payments,
           updatedAt: new Date(),
@@ -108,7 +128,7 @@ export async function PUT(request: Request) {
   }
 }
 
-export async function DELETE() {
+export async function PATCH(request: Request) {
   if (!hasMongoConfig()) {
     return NextResponse.json(
       { error: 'Missing MONGO_URI or MONGODB_URI environment variable' },
@@ -117,23 +137,89 @@ export async function DELETE() {
   }
 
   try {
-    const seed = createSeedData()
+    const body: unknown = await request.json()
+    const { password, names } = body as {
+      password?: unknown
+      names?: unknown
+    }
+
+    if (!isAuthorized(password)) {
+      return NextResponse.json({ error: 'Invalid password' }, { status: 401 })
+    }
+
+    if (!isValidNames(names)) {
+      return NextResponse.json({ error: 'Invalid member names' }, { status: 400 })
+    }
+
     const collection = await getCollection()
+    const current = await ensureSeedData()
+    const members = current.members.map((member) =>
+      names[member.id]?.trim()
+        ? { ...member, name: names[member.id].trim() }
+        : member,
+    )
 
     await collection.updateOne(
       { _id: DOCUMENT_ID },
       {
         $set: {
-          members: seed.members,
-          expenses: seed.expenses,
-          payments: seed.payments,
+          members,
           updatedAt: new Date(),
         },
       },
       { upsert: true },
     )
 
-    return NextResponse.json(seed)
+    return NextResponse.json({
+      members,
+      expenses: current.expenses,
+      payments: current.payments,
+    })
+  } catch (error) {
+    console.error('Failed to rename MongoDB members', error)
+    return NextResponse.json(
+      { error: 'Failed to rename members' },
+      { status: 500 },
+    )
+  }
+}
+
+export async function DELETE(request: Request) {
+  if (!hasMongoConfig()) {
+    return NextResponse.json(
+      { error: 'Missing MONGO_URI or MONGODB_URI environment variable' },
+      { status: 500 },
+    )
+  }
+
+  try {
+    const body: unknown = await request.json().catch(() => ({}))
+    const { password } = body as { password?: unknown }
+
+    if (!isAuthorized(password)) {
+      return NextResponse.json({ error: 'Invalid password' }, { status: 401 })
+    }
+
+    const collection = await getCollection()
+    const current = await ensureSeedData()
+    const cleared: AppData = {
+      members: current.members,
+      expenses: [],
+      payments: [],
+    }
+
+    await collection.updateOne(
+      { _id: DOCUMENT_ID },
+      {
+        $set: {
+          ...cleared,
+          updatedAt: new Date(),
+        },
+      },
+      { upsert: true },
+    )
+
+    return NextResponse.json(cleared)
   } catch (error) {
     console.error('Failed to reset MongoDB app data', error)
     return NextResponse.json(

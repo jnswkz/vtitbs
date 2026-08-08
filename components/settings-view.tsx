@@ -10,12 +10,16 @@ import { Field, TextInput } from '@/components/form-fields'
 import { MemberAvatar } from '@/components/member-avatar'
 
 export function SettingsView() {
-  const { members, renameMembers, resetToDemo } = useStore()
+  const { members, renameMembers, resetData } = useStore()
   const [names, setNames] = useState<Record<string, string>>({})
+  const [namePassword, setNamePassword] = useState('')
+  const [resetPassword, setResetPassword] = useState('')
   const [saved, setSaved] = useState(false)
   const [saving, setSaving] = useState(false)
   const [resetting, setResetting] = useState(false)
   const [resetOpen, setResetOpen] = useState(false)
+  const [nameError, setNameError] = useState<string | null>(null)
+  const [resetError, setResetError] = useState<string | null>(null)
 
   useEffect(() => {
     setNames(Object.fromEntries(members.map((m) => [m.id, m.name])))
@@ -24,19 +28,45 @@ export function SettingsView() {
   async function handleSave() {
     if (!canSave) return
     setSaving(true)
-    renameMembers(names)
-    setSaving(false)
-    setSaved(true)
-    window.setTimeout(() => setSaved(false), 1800)
+    setNameError(null)
+    try {
+      await renameMembers(names, namePassword)
+      setNamePassword('')
+      setSaved(true)
+      window.setTimeout(() => setSaved(false), 1800)
+    } catch (error) {
+      setNameError(
+        error instanceof Error
+          ? error.message
+          : 'Không thể đổi tên. Kiểm tra lại mật khẩu.',
+      )
+    } finally {
+      setSaving(false)
+    }
   }
 
   const dirty = members.some((m) => (names[m.id] ?? m.name) !== m.name)
-  const canSave = dirty && members.every((m) => (names[m.id] ?? '').trim())
+  const canSave =
+    dirty &&
+    Boolean(namePassword) &&
+    members.every((m) => (names[m.id] ?? '').trim())
 
   async function handleReset() {
     setResetting(true)
-    await resetToDemo()
-    setResetting(false)
+    setResetError(null)
+    try {
+      await resetData(resetPassword)
+      setResetPassword('')
+      setResetOpen(false)
+    } catch (error) {
+      setResetError(
+        error instanceof Error
+          ? error.message
+          : 'Không thể xóa dữ liệu. Kiểm tra lại mật khẩu.',
+      )
+    } finally {
+      setResetting(false)
+    }
   }
 
   return (
@@ -74,6 +104,23 @@ export function SettingsView() {
           ))}
         </div>
 
+        <Field
+          label="Mật khẩu"
+          htmlFor="name-password"
+          error={nameError ?? undefined}
+        >
+          <TextInput
+            id="name-password"
+            type="password"
+            value={namePassword}
+            onChange={(e) => {
+              setNamePassword(e.target.value)
+              setNameError(null)
+            }}
+            autoComplete="current-password"
+          />
+        </Field>
+
         <Button
           type="button"
           size="lg"
@@ -98,7 +145,7 @@ export function SettingsView() {
         <div>
           <h2 className="text-lg font-semibold text-foreground">Dữ liệu</h2>
           <p className="text-sm text-muted-foreground">
-            Dữ liệu được lưu trong MongoDB và đồng bộ qua Vercel.
+            Xóa toàn bộ khoản chi và trả nợ. Tên thành viên được giữ lại.
           </p>
         </div>
         <Button
@@ -110,7 +157,7 @@ export function SettingsView() {
           disabled={resetting}
         >
           <RotateCcw />
-          {resetting ? 'Đang khôi phục...' : 'Khôi phục dữ liệu demo'}
+          {resetting ? 'Đang xóa...' : 'Xóa dữ liệu'}
         </Button>
       </section>
 
@@ -121,14 +168,35 @@ export function SettingsView() {
       <ConfirmDialog
         open={resetOpen}
         onClose={() => {
-          if (!resetting) setResetOpen(false)
+          if (!resetting) {
+            setResetOpen(false)
+            setResetError(null)
+            setResetPassword('')
+          }
         }}
         onConfirm={handleReset}
-        title="Khôi phục dữ liệu demo?"
-        message="Toàn bộ khoản chi và trả nợ hiện tại sẽ bị xóa và thay bằng dữ liệu demo ban đầu."
-        confirmLabel={resetting ? 'Đang khôi phục...' : 'Khôi phục'}
-        confirmDisabled={resetting}
-      />
+        title="Xóa toàn bộ dữ liệu?"
+        message="Toàn bộ khoản chi và trả nợ hiện tại sẽ bị xóa. Tên thành viên sẽ được giữ lại."
+        confirmLabel={resetting ? 'Đang xóa...' : 'Xóa dữ liệu'}
+        confirmDisabled={resetting || !resetPassword}
+      >
+        <Field
+          label="Mật khẩu"
+          htmlFor="reset-password"
+          error={resetError ?? undefined}
+        >
+          <TextInput
+            id="reset-password"
+            type="password"
+            value={resetPassword}
+            onChange={(e) => {
+              setResetPassword(e.target.value)
+              setResetError(null)
+            }}
+            autoComplete="current-password"
+          />
+        </Field>
+      </ConfirmDialog>
     </div>
   )
 }

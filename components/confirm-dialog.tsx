@@ -2,6 +2,7 @@
 
 import { Button } from '@/components/ui/button'
 import { Modal } from '@/components/modal'
+import type { ReactNode } from 'react'
 
 export function ConfirmDialog({
   open,
@@ -11,6 +12,7 @@ export function ConfirmDialog({
   title,
   message,
   confirmLabel = 'Xóa',
+  children,
 }: {
   open: boolean
   onClose: () => void
@@ -19,6 +21,7 @@ export function ConfirmDialog({
   title: string
   message: string
   confirmLabel?: string
+  children?: ReactNode
 }) {
   return (
     <Modal
@@ -52,7 +55,10 @@ export function ConfirmDialog({
         </div>
       }
     >
-      <p className="text-sm text-muted-foreground text-pretty">{message}</p>
+      <div className="flex flex-col gap-4">
+        <p className="text-sm text-muted-foreground text-pretty">{message}</p>
+        {children}
+      </div>
     </Modal>
   )
 }

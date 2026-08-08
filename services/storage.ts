@@ -10,7 +10,8 @@ const STORAGE_KEY = 'split3:data:v1'
 export interface StorageAdapter {
   load(): Promise<AppData>
   save(data: AppData): Promise<void>
-  reset(): Promise<AppData>
+  renameMembers(names: Record<string, string>, password: string): Promise<AppData>
+  reset(password: string): Promise<AppData>
 }
 
 function isValidData(value: unknown): value is AppData {
@@ -58,15 +59,44 @@ export const localStorageAdapter: StorageAdapter = {
     }
   },
 
-  async reset(): Promise<AppData> {
-    const seed = createSeedData()
-    if (typeof window === 'undefined') return seed
+  async renameMembers(
+    names: Record<string, string>,
+    _password: string,
+  ): Promise<AppData> {
+    const current = await this.load()
+    const renamed: AppData = {
+      ...current,
+      members: current.members.map((member) =>
+        names[member.id]?.trim()
+          ? { ...member, name: names[member.id].trim() }
+          : member,
+      ),
+    }
     try {
-      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(seed))
+      if (typeof window !== 'undefined') {
+        window.localStorage.setItem(STORAGE_KEY, JSON.stringify(renamed))
+      }
     } catch {
       // Ignore quota / serialization errors in the MVP.
     }
-    return seed
+    return renamed
+  },
+
+  async reset(_password: string): Promise<AppData> {
+    const current = await this.load()
+    const cleared: AppData = {
+      members: current.members,
+      expenses: [],
+      payments: [],
+    }
+    try {
+      if (typeof window !== 'undefined') {
+        window.localStorage.setItem(STORAGE_KEY, JSON.stringify(cleared))
+      }
+    } catch {
+      // Ignore quota / serialization errors in the MVP.
+    }
+    return cleared
   },
 }
 
@@ -106,27 +136,66 @@ export const mongoStorageAdapter: StorageAdapter = {
     }
   },
 
-  async reset(): Promise<AppData> {
-    try {
-      const response = await fetch('/api/data', {
-        method: 'DELETE',
-        cache: 'no-store',
-      })
+  async renameMembers(
+    names: Record<string, string>,
+    password: string,
+  ): Promise<AppData> {
+    const response = await fetch('/api/data', {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ names, password }),
+    })
 
-      if (!response.ok) return localStorageAdapter.reset()
-
-      const parsed: unknown = await response.json()
-      if (!isValidData(parsed)) return localStorageAdapter.reset()
-
-      await localStorageAdapter.save(parsed)
-      return parsed
-    } catch {
-      return localStorageAdapter.reset()
+    if (!response.ok) {
+      throw new Error('Không thể đổi tên. Kiểm tra lại mật khẩu.')
     }
+
+    const parsed: unknown = await response.json()
+    if (!isValidData(parsed)) {
+      throw new Error('Dữ liệu trả về không hợp lệ.')
+    }
+
+    await localStorageAdapter.save(parsed)
+    return parsed
+  },
+
+  async reset(password: string): Promise<AppData> {
+    const response = await fetch('/api/data', {
+      method: 'DELETE',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      cache: 'no-store',
+      body: JSON.stringify({ password }),
+    })
+
+    if (!response.ok) {
+      throw new Error('Không thể xóa dữ liệu. Kiểm tra lại mật khẩu.')
+    }
+
+    const parsed: unknown = await response.json()
+    if (!isValidData(parsed)) {
+      throw new Error('Dữ liệu trả về không hợp lệ.')
+    }
+
+    await localStorageAdapter.save(parsed)
+    return parsed
   },
 }
 
-/** Remove all persisted data (used by "reset to demo data"). */
+export async function resetLocalFallback(): Promise<AppData> {
+  return localStorageAdapter.reset('')
+}
+
+export async function renameMembersLocalFallback(
+  names: Record<string, string>,
+): Promise<AppData> {
+  return localStorageAdapter.renameMembers(names, '')
+}
+
+/** Remove all persisted data (used by reset fallback). */
 export function clearStorage(): void {
   if (typeof window === 'undefined') return
   try {

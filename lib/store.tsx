@@ -72,8 +72,8 @@ interface StoreValue {
   addPayment: (input: PaymentInput) => void
   updatePayment: (id: string, input: PaymentInput) => void
   deletePayment: (id: string) => void
-  renameMembers: (names: Record<string, string>) => void
-  resetToDemo: () => Promise<void>
+  renameMembers: (names: Record<string, string>, password: string) => Promise<void>
+  resetData: (password: string) => Promise<void>
 }
 
 const StoreContext = createContext<StoreValue | null>(null)
@@ -228,21 +228,18 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     }))
   }, [])
 
-  const renameMembers = useCallback((names: Record<string, string>) => {
-    setData((prev) => ({
-      ...prev,
-      members: prev.members.map((m) =>
-        names[m.id] && names[m.id].trim()
-          ? { ...m, name: names[m.id].trim() }
-          : m,
-      ),
-    }))
-  }, [])
+  const renameMembers = useCallback(
+    async (names: Record<string, string>, password: string) => {
+      const updated = await mongoStorageAdapter.renameMembers(names, password)
+      setData(updated)
+    },
+    [],
+  )
 
-  const resetToDemo = useCallback(async () => {
+  const resetData = useCallback(async (password: string) => {
     clearStorage()
-    const seed = await mongoStorageAdapter.reset()
-    setData(seed)
+    const cleared = await mongoStorageAdapter.reset(password)
+    setData(cleared)
   }, [])
 
   const value: StoreValue = {
@@ -264,7 +261,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     updatePayment,
     deletePayment,
     renameMembers,
-    resetToDemo,
+    resetData,
   }
 
   return <StoreContext.Provider value={value}>{children}</StoreContext.Provider>
