@@ -13,19 +13,31 @@ export function SettingsView() {
   const { members, renameMembers, resetToDemo } = useStore()
   const [names, setNames] = useState<Record<string, string>>({})
   const [saved, setSaved] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [resetting, setResetting] = useState(false)
   const [resetOpen, setResetOpen] = useState(false)
 
   useEffect(() => {
     setNames(Object.fromEntries(members.map((m) => [m.id, m.name])))
   }, [members])
 
-  function handleSave() {
+  async function handleSave() {
+    if (!canSave) return
+    setSaving(true)
     renameMembers(names)
+    setSaving(false)
     setSaved(true)
     window.setTimeout(() => setSaved(false), 1800)
   }
 
   const dirty = members.some((m) => (names[m.id] ?? m.name) !== m.name)
+  const canSave = dirty && members.every((m) => (names[m.id] ?? '').trim())
+
+  async function handleReset() {
+    setResetting(true)
+    await resetToDemo()
+    setResetting(false)
+  }
 
   return (
     <div className="flex flex-col gap-6">
@@ -67,9 +79,11 @@ export function SettingsView() {
           size="lg"
           className="w-full"
           onClick={handleSave}
-          disabled={!dirty && !saved}
+          disabled={saving || (!canSave && !saved)}
         >
-          {saved ? (
+          {saving ? (
+            'Đang lưu...'
+          ) : saved ? (
             <>
               <Check />
               Đã lưu
@@ -84,7 +98,7 @@ export function SettingsView() {
         <div>
           <h2 className="text-lg font-semibold text-foreground">Dữ liệu</h2>
           <p className="text-sm text-muted-foreground">
-            Dữ liệu được lưu trên thiết bị này (localStorage).
+            Dữ liệu được lưu trong MongoDB và đồng bộ qua Vercel.
           </p>
         </div>
         <Button
@@ -93,9 +107,10 @@ export function SettingsView() {
           size="lg"
           className="w-full"
           onClick={() => setResetOpen(true)}
+          disabled={resetting}
         >
           <RotateCcw />
-          Khôi phục dữ liệu demo
+          {resetting ? 'Đang khôi phục...' : 'Khôi phục dữ liệu demo'}
         </Button>
       </section>
 
@@ -105,11 +120,14 @@ export function SettingsView() {
 
       <ConfirmDialog
         open={resetOpen}
-        onClose={() => setResetOpen(false)}
-        onConfirm={resetToDemo}
+        onClose={() => {
+          if (!resetting) setResetOpen(false)
+        }}
+        onConfirm={handleReset}
         title="Khôi phục dữ liệu demo?"
         message="Toàn bộ khoản chi và trả nợ hiện tại sẽ bị xóa và thay bằng dữ liệu demo ban đầu."
-        confirmLabel="Khôi phục"
+        confirmLabel={resetting ? 'Đang khôi phục...' : 'Khôi phục'}
+        confirmDisabled={resetting}
       />
     </div>
   )

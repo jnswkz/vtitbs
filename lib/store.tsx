@@ -29,7 +29,7 @@ import type {
   Settlement,
   Transaction,
 } from './types'
-import { clearStorage, localStorageAdapter } from '@/services/storage'
+import { clearStorage, mongoStorageAdapter } from '@/services/storage'
 
 function newId(): string {
   if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
@@ -73,7 +73,7 @@ interface StoreValue {
   updatePayment: (id: string, input: PaymentInput) => void
   deletePayment: (id: string) => void
   renameMembers: (names: Record<string, string>) => void
-  resetToDemo: () => void
+  resetToDemo: () => Promise<void>
 }
 
 const StoreContext = createContext<StoreValue | null>(null)
@@ -85,7 +85,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   // Load persisted data on the client after mount to avoid hydration issues.
   useEffect(() => {
     let active = true
-    localStorageAdapter.load().then((loaded) => {
+    mongoStorageAdapter.load().then((loaded) => {
       if (active) {
         setData(loaded)
         setReady(true)
@@ -99,7 +99,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   // Persist whenever data changes (only after the initial load).
   useEffect(() => {
     if (!ready) return
-    void localStorageAdapter.save(data)
+    void mongoStorageAdapter.save(data)
   }, [data, ready])
 
   const balances = useMemo(
@@ -239,9 +239,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     }))
   }, [])
 
-  const resetToDemo = useCallback(() => {
+  const resetToDemo = useCallback(async () => {
     clearStorage()
-    setData(createSeedData())
+    const seed = await mongoStorageAdapter.reset()
+    setData(seed)
   }, [])
 
   const value: StoreValue = {

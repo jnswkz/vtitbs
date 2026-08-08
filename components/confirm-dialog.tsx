@@ -7,13 +7,15 @@ export function ConfirmDialog({
   open,
   onClose,
   onConfirm,
+  confirmDisabled = false,
   title,
   message,
   confirmLabel = 'Xóa',
 }: {
   open: boolean
   onClose: () => void
-  onConfirm: () => void
+  onConfirm: () => void | Promise<void>
+  confirmDisabled?: boolean
   title: string
   message: string
   confirmLabel?: string
@@ -39,8 +41,9 @@ export function ConfirmDialog({
             variant="destructive"
             size="lg"
             className="flex-1"
-            onClick={() => {
-              onConfirm()
+            disabled={confirmDisabled}
+            onClick={async () => {
+              await onConfirm()
               onClose()
             }}
           >
