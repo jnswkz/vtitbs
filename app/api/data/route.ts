@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 
+import { isBankingQrImage } from '@/lib/banking-qr'
 import { getMongoDb, hasMongoConfig } from '@/lib/mongodb'
 import { createSeedData } from '@/lib/seed'
 import type { AppData } from '@/lib/types'
@@ -40,6 +41,14 @@ function isValidNames(value: unknown): value is Record<string, string> {
     typeof value === 'object' &&
     value !== null &&
     Object.values(value).every((name) => typeof name === 'string')
+  )
+}
+
+function isValidBankingQrImages(value: unknown): value is Record<string, string> {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    Object.values(value).every(isBankingQrImage)
   )
 }
 
@@ -138,9 +147,10 @@ export async function PATCH(request: Request) {
 
   try {
     const body: unknown = await request.json()
-    const { password, names } = body as {
+    const { password, names, bankingQrImages } = body as {
       password?: unknown
       names?: unknown
+      bankingQrImages?: unknown
     }
 
     if (!isAuthorized(password)) {
@@ -151,13 +161,24 @@ export async function PATCH(request: Request) {
       return NextResponse.json({ error: 'Invalid member names' }, { status: 400 })
     }
 
+    if (
+      bankingQrImages !== undefined &&
+      !isValidBankingQrImages(bankingQrImages)
+    ) {
+      return NextResponse.json(
+        { error: 'Invalid banking QR images' },
+        { status: 400 },
+      )
+    }
+
     const collection = await getCollection()
     const current = await ensureSeedData()
-    const members = current.members.map((member) =>
-      names[member.id]?.trim()
-        ? { ...member, name: names[member.id].trim() }
-        : member,
-    )
+    const members = current.members.map((member) => ({
+      ...member,
+      name: names[member.id]?.trim() ? names[member.id].trim() : member.name,
+      bankingQrImage:
+        bankingQrImages?.[member.id] ?? member.bankingQrImage,
+    }))
 
     await collection.updateOne(
       { _id: DOCUMENT_ID },

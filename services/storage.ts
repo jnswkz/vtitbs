@@ -10,7 +10,11 @@ const STORAGE_KEY = 'split3:data:v1'
 export interface StorageAdapter {
   load(): Promise<AppData>
   save(data: AppData): Promise<void>
-  renameMembers(names: Record<string, string>, password: string): Promise<AppData>
+  renameMembers(
+    names: Record<string, string>,
+    password: string,
+    bankingQrImages?: Record<string, string>,
+  ): Promise<AppData>
   reset(password: string): Promise<AppData>
 }
 
@@ -62,15 +66,17 @@ export const localStorageAdapter: StorageAdapter = {
   async renameMembers(
     names: Record<string, string>,
     _password: string,
+    bankingQrImages?: Record<string, string>,
   ): Promise<AppData> {
     const current = await this.load()
     const renamed: AppData = {
       ...current,
-      members: current.members.map((member) =>
-        names[member.id]?.trim()
-          ? { ...member, name: names[member.id].trim() }
-          : member,
-      ),
+      members: current.members.map((member) => ({
+        ...member,
+        name: names[member.id]?.trim() ? names[member.id].trim() : member.name,
+        bankingQrImage:
+          bankingQrImages?.[member.id] ?? member.bankingQrImage,
+      })),
     }
     try {
       if (typeof window !== 'undefined') {
@@ -139,13 +145,14 @@ export const mongoStorageAdapter: StorageAdapter = {
   async renameMembers(
     names: Record<string, string>,
     password: string,
+    bankingQrImages?: Record<string, string>,
   ): Promise<AppData> {
     const response = await fetch('/api/data', {
       method: 'PATCH',
       headers: {
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ names, password }),
+      body: JSON.stringify({ names, password, bankingQrImages }),
     })
 
     if (!response.ok) {
@@ -191,8 +198,9 @@ export async function resetLocalFallback(): Promise<AppData> {
 
 export async function renameMembersLocalFallback(
   names: Record<string, string>,
+  bankingQrImages?: Record<string, string>,
 ): Promise<AppData> {
-  return localStorageAdapter.renameMembers(names, '')
+  return localStorageAdapter.renameMembers(names, '', bankingQrImages)
 }
 
 /** Remove all persisted data (used by reset fallback). */

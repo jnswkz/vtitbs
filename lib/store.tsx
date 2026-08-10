@@ -72,7 +72,11 @@ interface StoreValue {
   addPayment: (input: PaymentInput) => void
   updatePayment: (id: string, input: PaymentInput) => void
   deletePayment: (id: string) => void
-  renameMembers: (names: Record<string, string>, password: string) => Promise<void>
+  renameMembers: (
+    names: Record<string, string>,
+    password: string,
+    bankingQrImages?: Record<string, string>,
+  ) => Promise<void>
   resetData: (password: string) => Promise<void>
 }
 
@@ -229,8 +233,16 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const renameMembers = useCallback(
-    async (names: Record<string, string>, password: string) => {
-      const updated = await mongoStorageAdapter.renameMembers(names, password)
+    async (
+      names: Record<string, string>,
+      password: string,
+      bankingQrImages?: Record<string, string>,
+    ) => {
+      const updated = await mongoStorageAdapter.renameMembers(
+        names,
+        password,
+        bankingQrImages,
+      )
       setData(updated)
     },
     [],

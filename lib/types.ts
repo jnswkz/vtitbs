@@ -7,6 +7,8 @@ export interface Member {
   name: string
   /** Optional avatar URL. When absent, the first letter of the name is used. */
   avatar?: string
+  /** Banking QR image filename from /public/banking-qr. */
+  bankingQrImage?: string
 }
 
 export interface ParticipantShare {

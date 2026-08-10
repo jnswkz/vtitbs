@@ -3,15 +3,23 @@
 import { Check, RotateCcw } from 'lucide-react'
 import { useEffect, useState } from 'react'
 
+import {
+  BANKING_QR_OPTIONS,
+  getBankingQrUrl,
+  getDefaultBankingQrImage,
+} from '@/lib/banking-qr'
 import { useStore } from '@/lib/store'
 import { Button } from '@/components/ui/button'
 import { ConfirmDialog } from '@/components/confirm-dialog'
-import { Field, TextInput } from '@/components/form-fields'
+import { Field, inputClass, TextInput } from '@/components/form-fields'
 import { MemberAvatar } from '@/components/member-avatar'
 
 export function SettingsView() {
   const { members, renameMembers, resetData } = useStore()
   const [names, setNames] = useState<Record<string, string>>({})
+  const [bankingQrImages, setBankingQrImages] = useState<Record<string, string>>(
+    {},
+  )
   const [namePassword, setNamePassword] = useState('')
   const [resetPassword, setResetPassword] = useState('')
   const [saved, setSaved] = useState(false)
@@ -23,6 +31,14 @@ export function SettingsView() {
 
   useEffect(() => {
     setNames(Object.fromEntries(members.map((m) => [m.id, m.name])))
+    setBankingQrImages(
+      Object.fromEntries(
+        members.map((m) => [
+          m.id,
+          m.bankingQrImage ?? getDefaultBankingQrImage(m.id),
+        ]),
+      ),
+    )
   }, [members])
 
   async function handleSave() {
@@ -30,7 +46,7 @@ export function SettingsView() {
     setSaving(true)
     setNameError(null)
     try {
-      await renameMembers(names, namePassword)
+      await renameMembers(names, namePassword, bankingQrImages)
       setNamePassword('')
       setSaved(true)
       window.setTimeout(() => setSaved(false), 1800)
@@ -46,8 +62,13 @@ export function SettingsView() {
   }
 
   const dirty = members.some((m) => (names[m.id] ?? m.name) !== m.name)
+  const qrDirty = members.some(
+    (m) =>
+      (bankingQrImages[m.id] ?? getDefaultBankingQrImage(m.id)) !==
+      (m.bankingQrImage ?? getDefaultBankingQrImage(m.id)),
+  )
   const canSave =
-    dirty &&
+    (dirty || qrDirty) &&
     Boolean(namePassword) &&
     members.every((m) => (names[m.id] ?? '').trim())
 
@@ -75,33 +96,79 @@ export function SettingsView() {
         <div>
           <h2 className="text-lg font-semibold text-foreground">Thành viên</h2>
           <p className="text-sm text-muted-foreground">
-            Đổi tên 3 thành viên trong nhóm.
+            Đổi tên và chọn QR ngân hàng cho từng thành viên.
           </p>
         </div>
 
         <div className="flex flex-col gap-4">
-          {members.map((m) => (
-            <div key={m.id} className="flex items-end gap-3">
-              <MemberAvatar
-                id={m.id}
-                name={names[m.id] ?? m.name}
-                size="md"
-                className="mb-0.5"
-              />
-              <div className="flex-1">
-                <Field label={`Thành viên`} htmlFor={`name-${m.id}`}>
-                  <TextInput
-                    id={`name-${m.id}`}
-                    value={names[m.id] ?? ''}
-                    onChange={(e) =>
-                      setNames((prev) => ({ ...prev, [m.id]: e.target.value }))
-                    }
-                    autoComplete="off"
+          {members.map((m) => {
+            const selectedQrImage =
+              bankingQrImages[m.id] ?? getDefaultBankingQrImage(m.id)
+            const qrUrl = getBankingQrUrl({
+              id: m.id,
+              bankingQrImage: selectedQrImage,
+            })
+
+            return (
+              <div
+                key={m.id}
+                className="flex flex-col gap-3 rounded-2xl border border-border bg-secondary/40 p-3"
+              >
+                <div className="flex items-end gap-3">
+                  <MemberAvatar
+                    id={m.id}
+                    name={names[m.id] ?? m.name}
+                    size="md"
+                    className="mb-0.5"
                   />
-                </Field>
+                  <div className="flex-1">
+                    <Field label="Thành viên" htmlFor={`name-${m.id}`}>
+                      <TextInput
+                        id={`name-${m.id}`}
+                        value={names[m.id] ?? ''}
+                        onChange={(e) =>
+                          setNames((prev) => ({
+                            ...prev,
+                            [m.id]: e.target.value,
+                          }))
+                        }
+                        autoComplete="off"
+                      />
+                    </Field>
+                  </div>
+                </div>
+
+                <div className="flex items-end gap-3">
+                  <img
+                    src={qrUrl}
+                    alt={`QR ngân hàng đang chọn cho ${names[m.id] ?? m.name}`}
+                    className="size-16 shrink-0 rounded-lg border border-border bg-background object-contain"
+                  />
+                  <div className="flex-1">
+                    <Field label="QR ngân hàng" htmlFor={`qr-${m.id}`}>
+                      <select
+                        id={`qr-${m.id}`}
+                        value={selectedQrImage}
+                        onChange={(e) =>
+                          setBankingQrImages((prev) => ({
+                            ...prev,
+                            [m.id]: e.target.value,
+                          }))
+                        }
+                        className={inputClass}
+                      >
+                        {BANKING_QR_OPTIONS.map((image) => (
+                          <option key={image} value={image}>
+                            {image}
+                          </option>
+                        ))}
+                      </select>
+                    </Field>
+                  </div>
+                </div>
               </div>
-            </div>
-          ))}
+            )
+          })}
         </div>
 
         <Field
