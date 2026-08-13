@@ -41,6 +41,11 @@ export function PaymentFormModal({
   const [note, setNote] = useState('')
   const [errors, setErrors] = useState<Errors>({})
   const [confirmDelete, setConfirmDelete] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [submitError, setSubmitError] = useState<string | null>(null)
+  const [deletePassword, setDeletePassword] = useState('')
+  const [deleteError, setDeleteError] = useState<string | null>(null)
+  const [deleting, setDeleting] = useState(false)
 
   useEffect(() => {
     if (!open) return
@@ -60,6 +65,9 @@ export function PaymentFormModal({
       setNote('')
     }
     setErrors({})
+    setSubmitError(null)
+    setDeletePassword('')
+    setDeleteError(null)
   }, [open, editing, members, settlements])
 
   const amount = parseVND(amountText)
@@ -93,8 +101,10 @@ export function PaymentFormModal({
     return Object.keys(next).length === 0
   }
 
-  function handleSubmit() {
+  async function handleSubmit() {
     if (!validate()) return
+    setSaving(true)
+    setSubmitError(null)
     const input: PaymentInput = {
       fromMemberId,
       toMemberId,
@@ -102,9 +112,17 @@ export function PaymentFormModal({
       createdAt: new Date(`${dateValue}T12:00:00`).toISOString(),
       note,
     }
-    if (editing) updatePayment(editing.id, input)
-    else addPayment(input)
-    onClose()
+    try {
+      if (editing) await updatePayment(editing.id, input)
+      else await addPayment(input)
+      onClose()
+    } catch (error) {
+      setSubmitError(
+        error instanceof Error ? error.message : 'Không thể lưu khoản trả nợ.',
+      )
+    } finally {
+      setSaving(false)
+    }
   }
 
   return (
@@ -132,8 +150,13 @@ export function PaymentFormModal({
             size="lg"
             className="flex-1"
             onClick={handleSubmit}
+            disabled={saving}
           >
-            {editing ? 'Lưu thay đổi' : 'Lưu khoản trả nợ'}
+            {saving
+              ? 'Đang lưu...'
+              : editing
+                ? 'Lưu thay đổi'
+                : 'Lưu khoản trả nợ'}
           </Button>
         </div>
       }
@@ -244,20 +267,63 @@ export function PaymentFormModal({
             className={cn(inputClass, 'h-auto resize-none py-2.5')}
           />
         </Field>
+
+        {submitError ? (
+          <p className="text-sm font-medium text-destructive">{submitError}</p>
+        ) : null}
       </div>
     </Modal>
 
     {editing ? (
       <ConfirmDialog
         open={confirmDelete}
-        onClose={() => setConfirmDelete(false)}
-        onConfirm={() => {
-          deletePayment(editing.id)
-          onClose()
+        onClose={() => {
+          if (!deleting) {
+            setConfirmDelete(false)
+            setDeletePassword('')
+            setDeleteError(null)
+          }
+        }}
+        onConfirm={async () => {
+          setDeleting(true)
+          setDeleteError(null)
+          try {
+            await deletePayment(editing.id, deletePassword)
+            setDeletePassword('')
+            onClose()
+          } catch (error) {
+            setDeleteError(
+              error instanceof Error
+                ? error.message
+                : 'Không thể xóa khoản trả nợ.',
+            )
+            return false
+          } finally {
+            setDeleting(false)
+          }
         }}
         title="Xóa khoản trả nợ?"
         message="Xóa giao dịch trả nợ này? Công nợ sẽ được tính lại ngay."
-      />
+        confirmLabel={deleting ? 'Đang xóa...' : 'Xóa'}
+        confirmDisabled={deleting || !deletePassword}
+      >
+        <Field
+          label="Mật khẩu"
+          htmlFor="delete-payment-password"
+          error={deleteError ?? undefined}
+        >
+          <TextInput
+            id="delete-payment-password"
+            type="password"
+            value={deletePassword}
+            onChange={(event) => {
+              setDeletePassword(event.target.value)
+              setDeleteError(null)
+            }}
+            autoComplete="current-password"
+          />
+        </Field>
+      </ConfirmDialog>
     ) : null}
     </>
   )

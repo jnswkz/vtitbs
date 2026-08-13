@@ -46,10 +46,50 @@ export interface Payment {
   note?: string
 }
 
+export type DeletedExpense = Expense & {
+  deletedAt: string
+  deletedReason?: string
+}
+
+export type DeletedPayment = Payment & {
+  deletedAt: string
+  deletedReason?: string
+}
+
+export type AuditAction =
+  | 'expense.created'
+  | 'expense.updated'
+  | 'expense.deleted'
+  | 'expense.restored'
+  | 'payment.created'
+  | 'payment.updated'
+  | 'payment.deleted'
+  | 'payment.restored'
+  | 'members.updated'
+  | 'data.reset'
+
+export interface AuditEvent {
+  id: string
+  action: AuditAction
+  entityType: 'expense' | 'payment' | 'members' | 'data'
+  entityId: string
+  createdAt: string
+  version: number
+  before?: unknown
+  after?: unknown
+  metadata?: {
+    userAgent?: string
+    ip?: string
+  }
+}
+
 export interface AppData {
   members: Member[]
   expenses: Expense[]
   payments: Payment[]
+  version: number
+  deletedExpenses: DeletedExpense[]
+  deletedPayments: DeletedPayment[]
 }
 
 /** Net balance for a single member (integer VND). */

@@ -8,6 +8,7 @@ import { useStore } from '@/lib/store'
 import type { Expense } from '@/lib/types'
 import { Button } from '@/components/ui/button'
 import { ConfirmDialog } from '@/components/confirm-dialog'
+import { Field, TextInput } from '@/components/form-fields'
 import { MemberAvatar } from '@/components/member-avatar'
 import { Modal } from '@/components/modal'
 
@@ -22,6 +23,9 @@ export function ExpenseDetailModal({
 }) {
   const { getMember, deleteExpense } = useStore()
   const [confirmOpen, setConfirmOpen] = useState(false)
+  const [password, setPassword] = useState('')
+  const [deleteError, setDeleteError] = useState<string | null>(null)
+  const [deleting, setDeleting] = useState(false)
 
   if (!expense) return null
   const payer = getMember(expense.payerId)
@@ -125,14 +129,51 @@ export function ExpenseDetailModal({
 
       <ConfirmDialog
         open={confirmOpen}
-        onClose={() => setConfirmOpen(false)}
-        onConfirm={() => {
-          deleteExpense(expense.id)
-          onClose()
+        onClose={() => {
+          if (!deleting) {
+            setConfirmOpen(false)
+            setPassword('')
+            setDeleteError(null)
+          }
+        }}
+        onConfirm={async () => {
+          setDeleting(true)
+          setDeleteError(null)
+          try {
+            await deleteExpense(expense.id, password)
+            setPassword('')
+            onClose()
+          } catch (error) {
+            setDeleteError(
+              error instanceof Error ? error.message : 'Không thể xóa khoản chi.',
+            )
+            return false
+          } finally {
+            setDeleting(false)
+          }
         }}
         title="Xóa khoản chi?"
         message={`Xóa "${expense.title}" (${formatVND(expense.amount)})? Công nợ sẽ được tính lại ngay.`}
-      />
+        confirmLabel={deleting ? 'Đang xóa...' : 'Xóa'}
+        confirmDisabled={deleting || !password}
+      >
+        <Field
+          label="Mật khẩu"
+          htmlFor="delete-expense-password"
+          error={deleteError ?? undefined}
+        >
+          <TextInput
+            id="delete-expense-password"
+            type="password"
+            value={password}
+            onChange={(event) => {
+              setPassword(event.target.value)
+              setDeleteError(null)
+            }}
+            autoComplete="current-password"
+          />
+        </Field>
+      </ConfirmDialog>
     </>
   )
 }

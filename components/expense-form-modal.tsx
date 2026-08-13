@@ -42,6 +42,8 @@ export function ExpenseFormModal({
   )
   const [note, setNote] = useState('')
   const [errors, setErrors] = useState<Errors>({})
+  const [saving, setSaving] = useState(false)
+  const [submitError, setSubmitError] = useState<string | null>(null)
 
   // Reset the form whenever it is (re)opened.
   useEffect(() => {
@@ -60,6 +62,7 @@ export function ExpenseFormModal({
       setNote('')
     }
     setErrors({})
+    setSubmitError(null)
   }, [open, editing, members])
 
   const amount = parseVND(amountText)
@@ -96,8 +99,10 @@ export function ExpenseFormModal({
     return Object.keys(next).length === 0
   }
 
-  function handleSubmit() {
+  async function handleSubmit() {
     if (!validate()) return
+    setSaving(true)
+    setSubmitError(null)
     const input: ExpenseInput = {
       title,
       amount,
@@ -105,9 +110,17 @@ export function ExpenseFormModal({
       participantIds: orderedParticipants,
       note,
     }
-    if (editing) updateExpense(editing.id, input)
-    else addExpense(input)
-    onClose()
+    try {
+      if (editing) await updateExpense(editing.id, input)
+      else await addExpense(input)
+      onClose()
+    } catch (error) {
+      setSubmitError(
+        error instanceof Error ? error.message : 'Không thể lưu khoản chi.',
+      )
+    } finally {
+      setSaving(false)
+    }
   }
 
   return (
@@ -122,8 +135,13 @@ export function ExpenseFormModal({
           size="lg"
           className="w-full"
           onClick={handleSubmit}
+          disabled={saving}
         >
-          {editing ? 'Lưu thay đổi' : 'Lưu khoản chi'}
+          {saving
+            ? 'Đang lưu...'
+            : editing
+              ? 'Lưu thay đổi'
+              : 'Lưu khoản chi'}
         </Button>
       }
     >
@@ -249,6 +267,10 @@ export function ExpenseFormModal({
             className={cn(inputClass, 'h-auto resize-none py-2.5')}
           />
         </Field>
+
+        {submitError ? (
+          <p className="text-sm font-medium text-destructive">{submitError}</p>
+        ) : null}
       </div>
     </Modal>
   )

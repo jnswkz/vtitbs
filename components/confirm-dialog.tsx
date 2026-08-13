@@ -16,7 +16,7 @@ export function ConfirmDialog({
 }: {
   open: boolean
   onClose: () => void
-  onConfirm: () => void | Promise<void>
+  onConfirm: () => void | boolean | Promise<void | boolean>
   confirmDisabled?: boolean
   title: string
   message: string
@@ -46,8 +46,8 @@ export function ConfirmDialog({
             className="flex-1"
             disabled={confirmDisabled}
             onClick={async () => {
-              await onConfirm()
-              onClose()
+              const shouldClose = await onConfirm()
+              if (shouldClose !== false) onClose()
             }}
           >
             {confirmLabel}

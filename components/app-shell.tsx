@@ -25,7 +25,7 @@ const NAV: { value: Tab; label: string; icon: typeof Home }[] = [
 ]
 
 export function AppShell() {
-  const { ready } = useStore()
+  const { ready, syncError, reloadData, clearSyncError } = useStore()
   const [tab, setTab] = useState<Tab>('home')
 
   const [expenseFormOpen, setExpenseFormOpen] = useState(false)
@@ -77,6 +77,11 @@ export function AppShell() {
           </div>
         ) : tab === 'home' ? (
           <div className="flex flex-col gap-4 pt-1">
+            <SyncErrorBanner
+              message={syncError}
+              onReload={reloadData}
+              onClose={clearSyncError}
+            />
             <MemberBalanceCards />
             <SettlementCard />
             <div className="grid grid-cols-2 gap-3">
@@ -97,7 +102,12 @@ export function AppShell() {
             <OverviewCard />
           </div>
         ) : tab === 'history' ? (
-          <div className="pt-1">
+          <div className="flex flex-col gap-3 pt-1">
+            <SyncErrorBanner
+              message={syncError}
+              onReload={reloadData}
+              onClose={clearSyncError}
+            />
             <TransactionList
               onSelectExpense={setDetailExpense}
               onSelectPayment={openEditPayment}
@@ -173,5 +183,30 @@ export function AppShell() {
         onEdit={openEditExpense}
       />
     </div>
+  )
+}
+
+function SyncErrorBanner({
+  message,
+  onReload,
+  onClose,
+}: {
+  message: string | null
+  onReload: () => Promise<void>
+  onClose: () => void
+}) {
+  if (!message) return null
+  return (
+    <section className="flex items-center gap-2 rounded-2xl border border-primary/30 bg-accent p-3">
+      <p className="min-w-0 flex-1 text-sm font-medium text-accent-foreground">
+        {message}
+      </p>
+      <Button type="button" size="sm" onClick={onReload}>
+        Tải lại
+      </Button>
+      <Button type="button" size="sm" variant="outline" onClick={onClose}>
+        Đóng
+      </Button>
+    </section>
   )
 }

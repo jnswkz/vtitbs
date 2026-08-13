@@ -17,48 +17,37 @@ import {
 import {
   calculateBalances,
   calculateSettlements,
-  splitAmountEqually,
 } from './calculation'
 import { createSeedData } from './seed'
 import type {
   AppData,
   Balance,
+  DeletedExpense,
+  DeletedPayment,
   Expense,
   Member,
   Payment,
   Settlement,
   Transaction,
 } from './types'
-import { clearStorage, mongoStorageAdapter } from '@/services/storage'
+import {
+  clearStorage,
+  mongoStorageAdapter,
+  StorageConflictError,
+} from '@/services/storage'
+import type { ExpenseInput, PaymentInput } from './app-data'
 
-function newId(): string {
-  if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
-    return crypto.randomUUID()
-  }
-  return `id-${Date.now()}-${Math.random().toString(36).slice(2)}`
-}
-
-export interface ExpenseInput {
-  title: string
-  amount: number
-  payerId: string
-  participantIds: string[]
-  note?: string
-}
-
-export interface PaymentInput {
-  fromMemberId: string
-  toMemberId: string
-  amount: number
-  createdAt?: string
-  note?: string
-}
+export type { ExpenseInput, PaymentInput } from './app-data'
 
 interface StoreValue {
   ready: boolean
   members: Member[]
   expenses: Expense[]
   payments: Payment[]
+  deletedExpenses: DeletedExpense[]
+  deletedPayments: DeletedPayment[]
+  version: number
+  syncError: string | null
   balances: Balance[]
   settlements: Settlement[]
   transactions: Transaction[]
@@ -66,18 +55,23 @@ interface StoreValue {
   spentByMember: Record<string, number>
   getMember: (id: string) => Member | undefined
   getBalance: (id: string) => number
-  addExpense: (input: ExpenseInput) => void
-  updateExpense: (id: string, input: ExpenseInput) => void
-  deleteExpense: (id: string) => void
-  addPayment: (input: PaymentInput) => void
-  updatePayment: (id: string, input: PaymentInput) => void
-  deletePayment: (id: string) => void
+  reloadData: () => Promise<void>
+  clearSyncError: () => void
+  addExpense: (input: ExpenseInput) => Promise<void>
+  updateExpense: (id: string, input: ExpenseInput) => Promise<void>
+  deleteExpense: (id: string, password: string) => Promise<void>
+  restoreExpense: (id: string, password: string) => Promise<void>
+  addPayment: (input: PaymentInput) => Promise<void>
+  updatePayment: (id: string, input: PaymentInput) => Promise<void>
+  deletePayment: (id: string, password: string) => Promise<void>
+  restorePayment: (id: string, password: string) => Promise<void>
   renameMembers: (
     names: Record<string, string>,
     password: string,
     bankingQrImages?: Record<string, string>,
   ) => Promise<void>
   resetData: (password: string) => Promise<void>
+  exportData: (password: string) => Promise<unknown>
 }
 
 const StoreContext = createContext<StoreValue | null>(null)
@@ -85,6 +79,7 @@ const StoreContext = createContext<StoreValue | null>(null)
 export function StoreProvider({ children }: { children: ReactNode }) {
   const [data, setData] = useState<AppData>(() => createSeedData())
   const [ready, setReady] = useState(false)
+  const [syncError, setSyncError] = useState<string | null>(null)
 
   // Load persisted data on the client after mount to avoid hydration issues.
   useEffect(() => {
@@ -100,11 +95,28 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     }
   }, [])
 
-  // Persist whenever data changes (only after the initial load).
-  useEffect(() => {
-    if (!ready) return
-    void mongoStorageAdapter.save(data)
-  }, [data, ready])
+  const reloadData = useCallback(async () => {
+    const loaded = await mongoStorageAdapter.load()
+    setData(loaded)
+    setReady(true)
+    setSyncError(null)
+  }, [])
+
+  const clearSyncError = useCallback(() => setSyncError(null), [])
+
+  const applyMutation = useCallback(async (mutate: () => Promise<AppData>) => {
+    try {
+      const updated = await mutate()
+      setData(updated)
+      setSyncError(null)
+    } catch (error) {
+      if (error instanceof StorageConflictError) {
+        setData(error.latest)
+        setSyncError(error.message)
+      }
+      throw error
+    }
+  }, [])
 
   const balances = useMemo(
     () => calculateBalances(data.members, data.expenses, data.payments),
@@ -152,85 +164,53 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     [balances],
   )
 
-  const addExpense = useCallback((input: ExpenseInput) => {
-    const expense: Expense = {
-      id: newId(),
-      title: input.title.trim(),
-      amount: input.amount,
-      payerId: input.payerId,
-      participantIds: input.participantIds,
-      participantShares: splitAmountEqually(input.amount, input.participantIds),
-      createdAt: new Date().toISOString(),
-      note: input.note?.trim() || undefined,
-    }
-    setData((prev) => ({ ...prev, expenses: [...prev.expenses, expense] }))
-  }, [])
+  const addExpense = useCallback(
+    (input: ExpenseInput) =>
+      applyMutation(() => mongoStorageAdapter.addExpense(data, input)),
+    [applyMutation, data],
+  )
 
-  const updateExpense = useCallback((id: string, input: ExpenseInput) => {
-    setData((prev) => ({
-      ...prev,
-      expenses: prev.expenses.map((e) =>
-        e.id === id
-          ? {
-              ...e,
-              title: input.title.trim(),
-              amount: input.amount,
-              payerId: input.payerId,
-              participantIds: input.participantIds,
-              participantShares: splitAmountEqually(
-                input.amount,
-                input.participantIds,
-              ),
-              note: input.note?.trim() || undefined,
-            }
-          : e,
-      ),
-    }))
-  }, [])
+  const updateExpense = useCallback(
+    (id: string, input: ExpenseInput) =>
+      applyMutation(() => mongoStorageAdapter.updateExpense(data, id, input)),
+    [applyMutation, data],
+  )
 
-  const deleteExpense = useCallback((id: string) => {
-    setData((prev) => ({
-      ...prev,
-      expenses: prev.expenses.filter((e) => e.id !== id),
-    }))
-  }, [])
+  const deleteExpense = useCallback(
+    (id: string, password: string) =>
+      applyMutation(() => mongoStorageAdapter.deleteExpense(data, id, password)),
+    [applyMutation, data],
+  )
 
-  const addPayment = useCallback((input: PaymentInput) => {
-    const payment: Payment = {
-      id: newId(),
-      fromMemberId: input.fromMemberId,
-      toMemberId: input.toMemberId,
-      amount: input.amount,
-      createdAt: input.createdAt ?? new Date().toISOString(),
-      note: input.note?.trim() || undefined,
-    }
-    setData((prev) => ({ ...prev, payments: [...prev.payments, payment] }))
-  }, [])
+  const restoreExpense = useCallback(
+    (id: string, password: string) =>
+      applyMutation(() => mongoStorageAdapter.restoreExpense(data, id, password)),
+    [applyMutation, data],
+  )
 
-  const updatePayment = useCallback((id: string, input: PaymentInput) => {
-    setData((prev) => ({
-      ...prev,
-      payments: prev.payments.map((p) =>
-        p.id === id
-          ? {
-              ...p,
-              fromMemberId: input.fromMemberId,
-              toMemberId: input.toMemberId,
-              amount: input.amount,
-              createdAt: input.createdAt ?? p.createdAt,
-              note: input.note?.trim() || undefined,
-            }
-          : p,
-      ),
-    }))
-  }, [])
+  const addPayment = useCallback(
+    (input: PaymentInput) =>
+      applyMutation(() => mongoStorageAdapter.addPayment(data, input)),
+    [applyMutation, data],
+  )
 
-  const deletePayment = useCallback((id: string) => {
-    setData((prev) => ({
-      ...prev,
-      payments: prev.payments.filter((p) => p.id !== id),
-    }))
-  }, [])
+  const updatePayment = useCallback(
+    (id: string, input: PaymentInput) =>
+      applyMutation(() => mongoStorageAdapter.updatePayment(data, id, input)),
+    [applyMutation, data],
+  )
+
+  const deletePayment = useCallback(
+    (id: string, password: string) =>
+      applyMutation(() => mongoStorageAdapter.deletePayment(data, id, password)),
+    [applyMutation, data],
+  )
+
+  const restorePayment = useCallback(
+    (id: string, password: string) =>
+      applyMutation(() => mongoStorageAdapter.restorePayment(data, id, password)),
+    [applyMutation, data],
+  )
 
   const renameMembers = useCallback(
     async (
@@ -238,27 +218,55 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       password: string,
       bankingQrImages?: Record<string, string>,
     ) => {
-      const updated = await mongoStorageAdapter.renameMembers(
-        names,
-        password,
-        bankingQrImages,
-      )
-      setData(updated)
+      try {
+        const updated = await mongoStorageAdapter.renameMembers(
+          data,
+          names,
+          password,
+          bankingQrImages,
+        )
+        setData(updated)
+        setSyncError(null)
+      } catch (error) {
+        if (error instanceof StorageConflictError) {
+          setData(error.latest)
+          setSyncError(error.message)
+        }
+        throw error
+      }
     },
-    [],
+    [data],
   )
 
   const resetData = useCallback(async (password: string) => {
-    clearStorage()
-    const cleared = await mongoStorageAdapter.reset(password)
-    setData(cleared)
-  }, [])
+    try {
+      clearStorage()
+      const cleared = await mongoStorageAdapter.reset(data, password)
+      setData(cleared)
+      setSyncError(null)
+    } catch (error) {
+      if (error instanceof StorageConflictError) {
+        setData(error.latest)
+        setSyncError(error.message)
+      }
+      throw error
+    }
+  }, [data])
+
+  const exportData = useCallback(
+    (password: string) => mongoStorageAdapter.exportData(password),
+    [],
+  )
 
   const value: StoreValue = {
     ready,
     members: data.members,
     expenses: data.expenses,
     payments: data.payments,
+    deletedExpenses: data.deletedExpenses,
+    deletedPayments: data.deletedPayments,
+    version: data.version,
+    syncError,
     balances,
     settlements,
     transactions,
@@ -266,14 +274,19 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     spentByMember,
     getMember,
     getBalance,
+    reloadData,
+    clearSyncError,
     addExpense,
     updateExpense,
     deleteExpense,
+    restoreExpense,
     addPayment,
     updatePayment,
     deletePayment,
+    restorePayment,
     renameMembers,
     resetData,
+    exportData,
   }
 
   return <StoreContext.Provider value={value}>{children}</StoreContext.Provider>

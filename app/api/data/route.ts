@@ -1,38 +1,28 @@
 import { NextResponse } from 'next/server'
 
+import {
+  assertFreshVersion,
+  isValidData,
+  renameMembersMutation,
+  resetDataMutation,
+  VersionConflictError,
+} from '@/lib/app-data'
 import { isBankingQrImage } from '@/lib/banking-qr'
-import { getMongoDb, hasMongoConfig } from '@/lib/mongodb'
-import { createSeedData } from '@/lib/seed'
-import type { AppData } from '@/lib/types'
+import { hasMongoConfig } from '@/lib/mongodb'
+import {
+  ensureAppData,
+  isAuthorized,
+  requestMetadata,
+  saveMutation,
+} from '@/lib/data-server'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
-const COLLECTION = 'app_data'
-const DOCUMENT_ID = 'default'
-
-type AppDataDocument = AppData & {
-  _id: typeof DOCUMENT_ID
-  updatedAt: Date
-}
-
-function isAuthorized(password: unknown): boolean {
-  const expected = process.env.RESET_PASSWORD
-  return (
-    typeof expected === 'string' &&
-    expected.length > 0 &&
-    typeof password === 'string' &&
-    password === expected
-  )
-}
-
-function isValidData(value: unknown): value is AppData {
-  if (typeof value !== 'object' || value === null) return false
-  const data = value as Partial<AppData>
-  return (
-    Array.isArray(data.members) &&
-    Array.isArray(data.expenses) &&
-    Array.isArray(data.payments)
+function mongoConfigError() {
+  return NextResponse.json(
+    { error: 'Missing MONGO_URI or MONGODB_URI environment variable' },
+    { status: 500 },
   )
 }
 
@@ -52,39 +42,18 @@ function isValidBankingQrImages(value: unknown): value is Record<string, string>
   )
 }
 
-async function getCollection() {
-  const db = await getMongoDb()
-  return db.collection<AppDataDocument>(COLLECTION)
-}
-
-async function ensureSeedData(): Promise<AppData> {
-  const collection = await getCollection()
-  const existing = await collection.findOne({ _id: DOCUMENT_ID })
-
-  if (existing) {
-    const { members, expenses, payments } = existing
-    return { members, expenses, payments }
-  }
-
-  const seed = createSeedData()
-  await collection.insertOne({
-    _id: DOCUMENT_ID,
-    ...seed,
-    updatedAt: new Date(),
-  })
-  return seed
+function conflict(error: VersionConflictError) {
+  return NextResponse.json(
+    { error: 'Stale data. Reload latest data before saving.', latest: error.latest },
+    { status: 409 },
+  )
 }
 
 export async function GET() {
-  if (!hasMongoConfig()) {
-    return NextResponse.json(
-      { error: 'Missing MONGO_URI or MONGODB_URI environment variable' },
-      { status: 500 },
-    )
-  }
+  if (!hasMongoConfig()) return mongoConfigError()
 
   try {
-    const data = await ensureSeedData()
+    const data = await ensureAppData()
     return NextResponse.json(data)
   } catch (error) {
     console.error('Failed to load MongoDB app data', error)
@@ -96,12 +65,7 @@ export async function GET() {
 }
 
 export async function PUT(request: Request) {
-  if (!hasMongoConfig()) {
-    return NextResponse.json(
-      { error: 'Missing MONGO_URI or MONGODB_URI environment variable' },
-      { status: 500 },
-    )
-  }
+  if (!hasMongoConfig()) return mongoConfigError()
 
   try {
     const body: unknown = await request.json()
@@ -109,27 +73,15 @@ export async function PUT(request: Request) {
       return NextResponse.json({ error: 'Invalid app data' }, { status: 400 })
     }
 
-    const collection = await getCollection()
-    const data = body
-    const existing = await collection.findOne({ _id: DOCUMENT_ID })
-    const members = existing?.members ?? createSeedData().members
-
-    await collection.updateOne(
-      { _id: DOCUMENT_ID },
+    return NextResponse.json(
       {
-        $set: {
-          members,
-          expenses: data.expenses,
-          payments: data.payments,
-          updatedAt: new Date(),
-        },
+        error:
+          'Whole-document saves are disabled. Use atomic expense/payment endpoints.',
       },
-      { upsert: true },
+      { status: 405 },
     )
-
-    return NextResponse.json({ ok: true })
   } catch (error) {
-    console.error('Failed to save MongoDB app data', error)
+    console.error('Rejected whole-document save', error)
     return NextResponse.json(
       { error: 'Failed to save app data' },
       { status: 500 },
@@ -138,19 +90,15 @@ export async function PUT(request: Request) {
 }
 
 export async function PATCH(request: Request) {
-  if (!hasMongoConfig()) {
-    return NextResponse.json(
-      { error: 'Missing MONGO_URI or MONGODB_URI environment variable' },
-      { status: 500 },
-    )
-  }
+  if (!hasMongoConfig()) return mongoConfigError()
 
   try {
     const body: unknown = await request.json()
-    const { password, names, bankingQrImages } = body as {
+    const { password, names, bankingQrImages, baseVersion } = body as {
       password?: unknown
       names?: unknown
       bankingQrImages?: unknown
+      baseVersion?: unknown
     }
 
     if (!isAuthorized(password)) {
@@ -171,32 +119,18 @@ export async function PATCH(request: Request) {
       )
     }
 
-    const collection = await getCollection()
-    const current = await ensureSeedData()
-    const members = current.members.map((member) => ({
-      ...member,
-      name: names[member.id]?.trim() ? names[member.id].trim() : member.name,
-      bankingQrImage:
-        bankingQrImages?.[member.id] ?? member.bankingQrImage,
-    }))
-
-    await collection.updateOne(
-      { _id: DOCUMENT_ID },
-      {
-        $set: {
-          members,
-          updatedAt: new Date(),
-        },
-      },
-      { upsert: true },
+    const current = await ensureAppData()
+    assertFreshVersion(current, baseVersion)
+    const result = renameMembersMutation(
+      current,
+      names,
+      bankingQrImages,
+      requestMetadata(request),
     )
-
-    return NextResponse.json({
-      members,
-      expenses: current.expenses,
-      payments: current.payments,
-    })
+    const data = await saveMutation(result)
+    return NextResponse.json(data)
   } catch (error) {
+    if (error instanceof VersionConflictError) return conflict(error)
     console.error('Failed to rename MongoDB members', error)
     return NextResponse.json(
       { error: 'Failed to rename members' },
@@ -206,42 +140,26 @@ export async function PATCH(request: Request) {
 }
 
 export async function DELETE(request: Request) {
-  if (!hasMongoConfig()) {
-    return NextResponse.json(
-      { error: 'Missing MONGO_URI or MONGODB_URI environment variable' },
-      { status: 500 },
-    )
-  }
+  if (!hasMongoConfig()) return mongoConfigError()
 
   try {
     const body: unknown = await request.json().catch(() => ({}))
-    const { password } = body as { password?: unknown }
+    const { password, baseVersion } = body as {
+      password?: unknown
+      baseVersion?: unknown
+    }
 
     if (!isAuthorized(password)) {
       return NextResponse.json({ error: 'Invalid password' }, { status: 401 })
     }
 
-    const collection = await getCollection()
-    const current = await ensureSeedData()
-    const cleared: AppData = {
-      members: current.members,
-      expenses: [],
-      payments: [],
-    }
-
-    await collection.updateOne(
-      { _id: DOCUMENT_ID },
-      {
-        $set: {
-          ...cleared,
-          updatedAt: new Date(),
-        },
-      },
-      { upsert: true },
-    )
-
-    return NextResponse.json(cleared)
+    const current = await ensureAppData()
+    assertFreshVersion(current, baseVersion)
+    const result = resetDataMutation(current, requestMetadata(request))
+    const data = await saveMutation(result)
+    return NextResponse.json(data)
   } catch (error) {
+    if (error instanceof VersionConflictError) return conflict(error)
     console.error('Failed to reset MongoDB app data', error)
     return NextResponse.json(
       { error: 'Failed to reset app data' },

@@ -74,5 +74,8 @@ export function createSeedData(): AppData {
         note: 'Trả bớt tiền ăn tối',
       },
     ],
+    version: 1,
+    deletedExpenses: [],
+    deletedPayments: [],
   }
 }
